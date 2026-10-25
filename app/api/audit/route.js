@@ -3,8 +3,9 @@ import { ObjectId } from "mongodb";
 import { detect, findPolicyUrl, htmlToText, verify } from "../../../lib/scan.js";
 import { audits } from "../../../lib/db.js";
 import { policyChecks, privacyHeaders } from "../../../lib/policy.js";
+import { runAgent } from "../../../lib/agent.js";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-4-argon";
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
@@ -69,14 +70,35 @@ Return JSON: {"code_fixes":[{"tracker_id":"","explanation":"","snippet":"HTML/JS
   try { url = new URL(/^https?:\/\//.test(body.url) ? body.url : `https://${body.url}`); } catch { return bad("Invalid URL"); }
   if (!["http:", "https:"].includes(url.protocol) || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(url.hostname)) return bad("Public http(s) URLs only");
   const host = url.hostname.replace(/^www\./, "");
+  const mode = body.mode === "agent" ? "agent" : "quick";
 
   // Same host already audited today: serve that instead of spending another model call.
   if (!body.force) {
     const start = new Date(today() + "T00:00:00Z");
-    const hit = col ? await col.findOne({ host, createdAt: { $gte: start } }, { sort: { createdAt: -1 } }).catch(() => null) : memory.get(`${host}|${today()}`);
+    const modeQuery = mode === "agent" ? "agent" : { $ne: "agent" };
+    const hit = col ? await col.findOne({ host, mode: modeQuery, createdAt: { $gte: start } }, { sort: { createdAt: -1 } }).catch(() => null) : memory.get(`${host}|${mode}|${today()}`);
     if (hit) return Response.json({ ...hit, auditId: hit._id || hit.auditId, cached: true });
   }
   if (!process.env.GEMINI_API_KEY) return bad("GEMINI_API_KEY is not set on the server", 500);
+
+  if (mode === "agent") {
+    const t0 = performance.now();
+    try {
+      const a = await runAgent({ url: url.toString(), model: MODEL, apiKey: process.env.GEMINI_API_KEY });
+      const prev = col ? await col.findOne({ host }, { sort: { createdAt: -1 }, projection: { createdAt: 1, "scan.trackers.vendor": 1, score: 1 } }).catch(() => null) : null;
+      const changes = prev ? { since: prev.createdAt, previousScore: prev.score, added: a.scan.trackers.map((t) => t.vendor).filter((v) => !prev.scan.trackers.some((x) => x.vendor === v)), removed: prev.scan.trackers.map((t) => t.vendor).filter((v) => !a.scan.trackers.some((x) => x.vendor === v)) } : null;
+      const result = {
+        mode, url: url.toString(), host, model: MODEL, scan: a.scan, findings: a.findings, log: a.log, trace: a.trace, revised: a.revised,
+        pagesInspected: a.pagesInspected, policyUrl: a.policyUrls[0] || null, policyUrls: a.policyUrls, unchecked: a.unchecked,
+        policy_summary: a.policy_summary, risk_summary: a.risk_summary, policy: policyChecks(a.policyText), headers: null, changes,
+        policyWords: a.policyText ? a.policyText.split(" ").length : 0, pageBytes: a.html.length, ...score(a.findings), createdAt: new Date(),
+        timings: { total: ms(t0) },
+      };
+      if (col) { const { insertedId } = await col.insertOne({ ...result }); result.auditId = insertedId; result.log.push(`Saved audit ${insertedId} to MongoDB Atlas`); }
+      else memory.set(`${host}|${mode}|${today()}`, result);
+      return Response.json({ ...result, cached: false, db: !!col });
+    } catch (e) { return bad(e.message, 502); }
+  }
 
   const log = [];
   const timings = {};
@@ -130,7 +152,7 @@ Return JSON: {"policy_summary":"2 sentences on what the policy claims","findings
       changes = { since: prev.createdAt, previousScore: prev.score, added: [...now].filter((v) => !before.has(v)), removed: [...before].filter((v) => !now.has(v)) };
     }
     const result = {
-      policy, headers, changes,
+      mode, policy, headers, changes,
       url: url.toString(), host, policyUrl, model: MODEL, scan, findings, log, timings,
       policy_summary: analysis.policy_summary, risk_summary: analysis.risk_summary,
       policyWords: policyText ? policyText.split(" ").length : 0, pageBytes: html.length,
@@ -141,7 +163,7 @@ Return JSON: {"policy_summary":"2 sentences on what the policy claims","findings
       const { insertedId } = await col.insertOne({ ...result });
       result.auditId = insertedId;
       log.push(`Saved audit ${insertedId} to MongoDB Atlas`);
-    } else memory.set(`${host}|${today()}`, result);
+    } else memory.set(`${host}|${mode}|${today()}`, result);
     return Response.json({ ...result, cached: false, db: !!col });
   } catch (e) {
     return bad(e.message, 502);
@@ -152,10 +174,10 @@ Return JSON: {"policy_summary":"2 sentences on what the policy claims","findings
 export async function GET() {
   const col = await audits().catch(() => null);
   const rows = col
-    ? await col.find({}, { projection: { host: 1, url: 1, createdAt: 1, score: 1, grade: 1, findings: 1, approvedAt: 1 } }).sort({ createdAt: -1 }).limit(15).toArray()
+    ? await col.find({}, { projection: { host: 1, url: 1, mode: 1, createdAt: 1, score: 1, grade: 1, findings: 1, approvedAt: 1 } }).sort({ createdAt: -1 }).limit(15).toArray()
     : [...memory.values()].reverse();
   return Response.json({
     db: !!col,
-    audits: rows.map((r) => ({ id: r._id || r.host, host: r.host, url: r.url, createdAt: r.createdAt, score: r.score, grade: r.grade, verified: (r.findings || []).filter((f) => f.verified).length, approved: !!r.approvedAt })),
+    audits: rows.map((r) => ({ id: r._id || r.host, host: r.host, mode: r.mode || "quick", url: r.url, createdAt: r.createdAt, score: r.score, grade: r.grade, verified: (r.findings || []).filter((f) => f.verified).length, approved: !!r.approvedAt })),
   });
 }

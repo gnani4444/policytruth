@@ -51,6 +51,14 @@ For Vercel, allow access from anywhere (`0.0.0.0/0`) in Atlas Network Access, be
 - Detects 8 consent managers (OneTrust, Cookiebot, Didomi, Usercentrics, Osano, CookieYes, Termly, Google Consent Mode).
 - Records for each tracker whether its script is consent-gated, and whether the policy names the vendor.
 
+**Agent mode (default)**
+- Gemini runs as a tool-using agent with three tools: `inspect_page`, `read_policy` and `submit_findings`.
+- It plans the audit itself: homepage first, then the pages most likely to carry extra trackers (signup, pricing, checkout, contact), then every privacy and cookie policy it finds. It can call several tools in parallel.
+- Budget: up to 6 page inspections and 10 steps. Tools refuse any URL outside the audited site, so page content cannot steer the agent elsewhere.
+- Feedback loop: when the verifier rejects findings, the rejection reasons go back to the agent. It can gather more evidence or drop the claim, then resubmit (one revision round).
+- The Agent trace tab shows every tool call in order, with the agent's stated reason, result and timing.
+- Example: on theguardian.com the agent found the full privacy policy at `/help/privacy-policy` (6,754 words) and the cookie policy, which a single-page fetch missed.
+
 **Gemini reasoning, then verification**
 - Gemini reads the full policy (up to 400,000 characters) and the scan. It proposes findings of three types: `undisclosed`, `pre_consent` and `vague_disclosure`, each with an exact policy quote.
 - The verifier rejects a finding when the tracker is not in the page source, when the evidence contradicts it, when the quoted text is not in the policy, or when the policy could not be fetched. Rejected claims are shown with the reason.
@@ -70,7 +78,7 @@ For Vercel, allow access from anywhere (`0.0.0.0/0`) in Atlas Network Access, be
 - Tracker changes since the previous audit of the same site (needs MongoDB).
 
 **Workflow**
-- Tabs: Overview, Findings, Trackers, Policy, Fixes, History, How it works.
+- Tabs: Overview, Agent trace, Findings, Trackers, Policy, Fixes, History, How it works.
 - Same-day cache: an audit of the same site from today loads from the browser or MongoDB, with no new model call. **Re-run now** forces a fresh audit.
 - Exports: Markdown report, raw JSON, print to PDF. Copy buttons on every fix.
 
@@ -102,6 +110,7 @@ URL ──> fetch page + headers ──> find policy link ──> fetch policy
 | `app/api/audit/route.js` | `POST` runs an audit or drafts fixes; `GET` returns recent audits. |
 | `lib/scan.js` | Tracker and consent-manager detection, policy link finder, verifier. |
 | `lib/policy.js` | Article 13 checklist, readability, last-updated date, privacy headers. |
+| `lib/agent.js` | Agent mode: Gemini function-calling loop, same-site tools, verifier feedback round. |
 | `lib/db.js` | Cached MongoDB connection that retries after a failure. |
 
 ## API
@@ -109,8 +118,10 @@ URL ──> fetch page + headers ──> find policy link ──> fetch policy
 `POST /api/audit`
 
 ```json
-{ "url": "theguardian.com", "force": false }
+{ "url": "theguardian.com", "force": false, "mode": "agent" }
 ```
+
+`mode` is `"agent"` (multi-page, tool-using agent, about 30 to 90 seconds) or `"quick"` (homepage plus linked policy, about 25 seconds). Agent results also include `trace`, `pagesInspected`, `policyUrls` and `revised`.
 
 Returns the scan, findings (each with `verified` and `rejected_because`), `score`, `grade`, `policy`, `headers`, `changes`, `timings`, `log` and `auditId`. With `force: false`, an audit of the same host from today is returned with `cached: true`.
 

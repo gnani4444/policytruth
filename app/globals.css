@@ -144,3 +144,11 @@ pre { background: var(--bg); padding: 12px; border-radius: 10px; font-size: 12px
 .banner.info { background: color-mix(in srgb, var(--primary) 10%, var(--surface)); color: var(--fg); }
 .mini b { min-width: 96px; }
 .mini code { margin-left: auto; word-break: break-all; }
+.toggle { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; max-width: 720px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.toggle input { width: 18px; height: 18px; margin-top: 1px; accent-color: var(--primary); flex: none; }
+.toggle b { color: var(--text); }
+.trace { list-style: none; padding: 0; margin: 0; display: grid; gap: 0; counter-reset: step; }
+.trace li { display: grid; grid-template-columns: 130px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.trace .tool { font-family: "JetBrains Mono", monospace; font-size: 12px; font-weight: 600; color: var(--primary); }
+.trace li.submit .tool { color: var(--ok); }
+@media (max-width: 560px) { .trace li { grid-template-columns: 1fr; gap: 4px; } }

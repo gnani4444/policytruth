@@ -8,7 +8,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 const EXAMPLES = ["theguardian.com", "asos.com", "bbc.co.uk", "monzo.com"];
-const TABS = [["overview", "Overview"], ["findings", "Findings"], ["trackers", "Trackers"], ["policy", "Policy"], ["fixes", "Fixes"], ["history", "History"], ["about", "How it works"]];
+const TABS = [["overview", "Overview"], ["agent", "Agent trace"], ["findings", "Findings"], ["trackers", "Trackers"], ["policy", "Policy"], ["fixes", "Fixes"], ["history", "History"], ["about", "How it works"]];
 const ISSUE = { undisclosed: "Undisclosed", pre_consent: "Loads before consent", vague_disclosure: "Vague disclosure" };
 
 async function post(body) {
@@ -84,21 +84,22 @@ export default function Home() {
   const [sev, setSev] = useState("all");
   const [copied, setCopied] = useState("");
   const [tab, setTab] = useState("overview");
+  const [agentMode, setAgentMode] = useState(true);
 
   const loadHistory = () => fetch("/api/audit").then((r) => r.json()).then(setHistory).catch(() => {});
   useEffect(() => { loadHistory(); }, []);
 
-  async function audit(target, force = false) {
+  async function audit(target, force = false, mode = agentMode ? "agent" : "quick") {
     const host = hostOf(target);
     if (!host) return setErr("Enter a valid website address");
     setUrl(target); setErr(""); setFix(null); setApproved({});
-    const key = `pt:${host}:${today()}`;
+    const key = `pt:${host}:${mode}:${today()}`;
     // Browser cache first: an audit of this host from today is reused without a network call.
     const local = !force && store.get(key);
     if (local) { setRes({ ...local, cached: true, cacheSource: "browser" }); setTab("overview"); return; }
     setBusy("audit"); setRes(null);
     try {
-      const r = await post({ url: target, force });
+      const r = await post({ url: target, force, mode });
       const out = { ...r, cacheSource: r.cached ? "server" : null };
       setRes(out); store.set(key, r); loadHistory(); setTab("overview");
     } catch (e) { setErr(e.message); }
@@ -139,7 +140,7 @@ export default function Home() {
         <nav className="tabs" aria-label="Sections">
           {TABS.map(([id, label]) => {
             const count = id === "findings" && m ? m.verified.length : id === "trackers" && m ? m.trackers : id === "history" ? history.audits.length : null;
-            const off = !res && !["overview", "history", "about"].includes(id);
+            const off = (!res && !["overview", "history", "about"].includes(id)) || (id === "agent" && res && !res.trace);
             return <button key={id} className={tab === id ? "on" : ""} aria-current={tab === id ? "page" : undefined} disabled={off} onClick={() => setTab(id)}>{label}{count != null && <span className="count">{count}</span>}</button>;
           })}
         </nav>
@@ -158,13 +159,14 @@ export default function Home() {
               <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="yourcompany.co.uk" aria-label="Website address" required />
               <button className="primary" disabled={!!busy}>{busy === "audit" ? <><span className="spin" />Auditing</> : "Run audit"}</button>
             </form>
+            <label className="toggle"><input type="checkbox" checked={agentMode} onChange={(e) => setAgentMode(e.target.checked)} /><span><b>Agent mode</b>: Gemini plans the audit, crawls up to 6 pages, reads every policy it finds, and revises its findings when the verifier rejects them.</span></label>
             <div className="examples">Try: {EXAMPLES.map((e) => <button key={e} className="link" onClick={() => audit(e)} disabled={!!busy}>{e}</button>)}</div>
           </section>}
           {err && <div className="alert"><Icon d={I.alert} />{err}</div>}
 
           {busy === "audit" && (
             <section className="card skeleton-card" aria-live="polite">
-              <div className="muted">Fetching the site and policy, scanning trackers, asking Gemini, verifying every claim…</div>
+              <div className="muted">{agentMode ? "Agent is planning the audit, inspecting pages, reading policies and checking its own findings. This takes 30 to 90 seconds…" : "Fetching the site and policy, scanning trackers, asking Gemini, verifying every claim…"}</div>
               <div className="bar"><div className="bar-fill indeterminate" /></div>
             </section>
           )}
@@ -176,7 +178,7 @@ export default function Home() {
               )}
               {tab === "overview" && res.cached && (
                 <div className="banner"><Icon d={I.clock} />Showing today&apos;s audit from {res.cacheSource === "browser" ? "this browser" : "MongoDB"} ({new Date(res.createdAt).toLocaleTimeString()}). No new model call was made.
-                  <button className="ghost" onClick={() => audit(res.url, true)}><Icon d={I.refresh} size={14} />Re-run now</button></div>
+                  <button className="ghost" onClick={() => audit(res.url, true, res.mode === "agent" ? "agent" : "quick")}><Icon d={I.refresh} size={14} />Re-run now</button></div>
               )}
 
               {tab === "overview" && <>
@@ -287,6 +289,26 @@ export default function Home() {
                 </section>
               )}</>}
 
+              {tab === "agent" && res.trace && (
+                <section className="card">
+                  <h3>Agent trace <span className="muted">({res.trace.length} steps · {res.pagesInspected?.length || 0} pages · {res.policyUrls?.length || 0} policies{res.revised ? " · revised after verifier feedback" : ""})</span></h3>
+                  <p className="muted">Every tool call Gemini made, in order, with its stated reason. The agent can only fetch pages on the audited site.</p>
+                  <ol className="trace">
+                    {res.trace.map((t, i) => (
+                      <li key={i} className={t.tool === "submit_findings" ? "submit" : ""}>
+                        <span className="tool">{t.tool}</span>
+                        <div>
+                          {t.url && <div className="mono small">{t.url}</div>}
+                          {t.reason && <div>{t.reason}</div>}
+                          <div className="muted small">{t.summary}{t.ms != null ? ` · ${t.ms} ms` : ""}</div>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                  {res.unchecked && <p className="muted"><b>Agent says not checked:</b> {res.unchecked}</p>}
+                </section>
+              )}
+
               {tab === "policy" && (
                 <div className="two">
                   <section className="card">
@@ -338,9 +360,9 @@ export default function Home() {
           <h3>Audit history</h3>
           <p className="muted small">{history.db ? "Stored in MongoDB Atlas" : "Stored on this server instance"}. Audits from today load instantly.</p>
           {history.audits.map((a) => (
-            <button key={String(a.id) + a.createdAt} className="hist" onClick={() => audit(a.url || a.host)}>
+            <button key={String(a.id) + a.createdAt} className="hist" onClick={() => audit(a.url || a.host, false, a.mode === "agent" ? "agent" : "quick")}>
               <span className={`grade g${a.grade}`}>{a.grade || "?"}</span>
-              <span className="hist-body"><b>{a.host}</b><span className="muted small">{new Date(a.createdAt).toLocaleString()} · {a.verified} findings{a.approved ? " · fixed" : ""}</span></span>
+              <span className="hist-body"><b>{a.host}{a.mode === "agent" ? " · agent" : ""}</b><span className="muted small">{new Date(a.createdAt).toLocaleString()} · {a.verified} findings{a.approved ? " · fixed" : ""}</span></span>
             </button>
           ))}
           {!history.audits.length && <p className="empty">No audits yet.</p>}
