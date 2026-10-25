@@ -36,9 +36,10 @@
           "reviewer",
           "ui",
           "api",
-          "mongo"
+          "mongo",
+          "json"
         ],
-        "note": "Fixes are drafted only for approved findings; every audit is stored."
+        "note": "Fixes are drafted only for approved findings; every audit is stored in Atlas, or as JSON when Atlas is unreachable."
       }
     ],
     "repository": {
@@ -64,7 +65,7 @@
     {
       "id": "ui",
       "type": "frontend",
-      "label": "Dashboard",
+      "label": "Certificate UI",
       "sublabel": "app/page.js",
       "pos": [
         240,
@@ -78,7 +79,8 @@
         {
           "path": "app/page.js"
         }
-      ]
+      ],
+      "tag": "Defects · Inspection · Log · Fixes"
     },
     {
       "id": "api",
@@ -160,6 +162,11 @@
       "size": [
         140,
         64
+      ],
+      "sources": [
+        {
+          "path": "lib/db.js"
+        }
       ]
     },
     {
@@ -202,6 +209,29 @@
           "path": "lib/scan.js"
         }
       ]
+    },
+    {
+      "id": "json",
+      "type": "database",
+      "label": "JSON storage",
+      "sublabel": "/tmp + seed file",
+      "pos": [
+        240,
+        120
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "tag": "Atlas offline",
+      "sources": [
+        {
+          "path": "lib/db.js"
+        },
+        {
+          "path": "data/audits.seed.json"
+        }
+      ]
     }
   ],
   "boundaries": [
@@ -213,7 +243,8 @@
         "api",
         "agent",
         "scanner",
-        "verifier"
+        "verifier",
+        "json"
       ]
     }
   ],
@@ -285,6 +316,13 @@
       "variant": "security",
       "fromSide": "top",
       "toSide": "bottom"
+    },
+    {
+      "id": "api-json",
+      "from": "api",
+      "to": "json",
+      "label": "fallback",
+      "variant": "dashed"
     }
   ],
   "cards": [
@@ -309,7 +347,7 @@
       "title": "Human control + storage",
       "items": [
         "Fixes drafted only for approved findings",
-        "Atlas stores scan, trace, verdicts, approvals"
+        "Atlas stores scan, trace, verdicts, approvals; JSON + seed when it is down"
       ]
     }
   ]

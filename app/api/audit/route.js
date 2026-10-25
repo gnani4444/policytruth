@@ -1,7 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
-import { ObjectId } from "mongodb";
 import { detect, findPolicyUrl, htmlToText, verify } from "../../../lib/scan.js";
-import { audits } from "../../../lib/db.js";
+import { store } from "../../../lib/db.js";
 import { policyChecks, privacyHeaders } from "../../../lib/policy.js";
 import { runAgent } from "../../../lib/agent.js";
 
@@ -11,8 +10,6 @@ const MODEL = process.env.GEMINI_MODEL || "gemini-4-argon";
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 const WEIGHT = { high: 25, medium: 12, low: 5 };
 
-// Fallback cache when MongoDB is not configured; lives per server instance.
-const memory = globalThis._ptMemory || (globalThis._ptMemory = new Map());
 const today = () => new Date().toISOString().slice(0, 10);
 
 async function get(url) {
@@ -45,9 +42,18 @@ function score(findings) {
   return { score: s, grade: s >= 90 ? "A" : s >= 75 ? "B" : s >= 60 ? "C" : s >= 40 ? "D" : "F" };
 }
 
+// Store the audit; the log line says where it went so the run log shows a storage fallback.
+async function save(db, result) {
+  const before = db.kind;
+  result.auditId = await db.insert(result);
+  const kind = (await store()).kind === "mongodb" && before === "mongodb" ? "mongodb" : "json";
+  result.log.push(kind === "mongodb" ? `Saved audit ${result.auditId} to MongoDB Atlas` : `Saved audit ${result.auditId} to JSON storage (MongoDB unavailable)`);
+  return { ...result, cached: false, storage: kind, db: kind === "mongodb" };
+}
+
 export async function POST(req) {
   const body = await req.json().catch(() => ({}));
-  const col = await audits().catch(() => null);
+  const db = await store();
 
   // Step 2: human approved specific findings, now draft fixes for those only.
   if (body.action === "fix") {
@@ -58,9 +64,7 @@ export async function POST(req) {
       const out = await gemini(`You are a UK privacy engineer (UK GDPR, PECR). A human reviewer approved these verified findings for ${body.url}:
 ${JSON.stringify(approved, null, 2)}
 Return JSON: {"code_fixes":[{"tracker_id":"","explanation":"","snippet":"HTML/JS showing the script blocked until consent, e.g. type=text/plain + CMP category, or Google Consent Mode default denied"}],"policy_redline":"Markdown paragraph(s) to ADD to the privacy policy disclosing each vendor, purpose, lawful basis (consent) and retention","summary":"one sentence"}`);
-      if (col && body.auditId && ObjectId.isValid(body.auditId)) {
-        await col.updateOne({ _id: new ObjectId(body.auditId) }, { $set: { approved, fixes: out, approvedAt: new Date() } }).catch(() => {});
-      }
+      if (body.auditId) await db.approve(String(body.auditId), { approved, fixes: out, approvedAt: new Date() }).catch(() => {});
       return Response.json(out);
     } catch (e) { return bad(e.message, 502); }
   }
@@ -75,9 +79,8 @@ Return JSON: {"code_fixes":[{"tracker_id":"","explanation":"","snippet":"HTML/JS
   // Same host already audited today: serve that instead of spending another model call.
   if (!body.force) {
     const start = new Date(today() + "T00:00:00Z");
-    const modeQuery = mode === "agent" ? "agent" : { $ne: "agent" };
-    const hit = col ? await col.findOne({ host, mode: modeQuery, createdAt: { $gte: start } }, { sort: { createdAt: -1 } }).catch(() => null) : memory.get(`${host}|${mode}|${today()}`);
-    if (hit) return Response.json({ ...hit, auditId: hit._id || hit.auditId, cached: true });
+    const hit = await db.today(host, mode, start).catch(() => null);
+    if (hit) return Response.json({ ...hit, auditId: hit._id || hit.auditId, cached: true, storage: db.kind });
   }
   if (!process.env.GEMINI_API_KEY) return bad("GEMINI_API_KEY is not set on the server", 500);
 
@@ -85,7 +88,7 @@ Return JSON: {"code_fixes":[{"tracker_id":"","explanation":"","snippet":"HTML/JS
     const t0 = performance.now();
     try {
       const a = await runAgent({ url: url.toString(), model: MODEL, apiKey: process.env.GEMINI_API_KEY });
-      const prev = col ? await col.findOne({ host }, { sort: { createdAt: -1 }, projection: { createdAt: 1, "scan.trackers.vendor": 1, score: 1 } }).catch(() => null) : null;
+      const prev = await db.previous(host).catch(() => null);
       const changes = prev ? { since: prev.createdAt, previousScore: prev.score, added: a.scan.trackers.map((t) => t.vendor).filter((v) => !prev.scan.trackers.some((x) => x.vendor === v)), removed: prev.scan.trackers.map((t) => t.vendor).filter((v) => !a.scan.trackers.some((x) => x.vendor === v)) } : null;
       const result = {
         mode, url: url.toString(), host, model: MODEL, scan: a.scan, findings: a.findings, log: a.log, trace: a.trace, revised: a.revised,
@@ -94,9 +97,7 @@ Return JSON: {"code_fixes":[{"tracker_id":"","explanation":"","snippet":"HTML/JS
         policyWords: a.policyText ? a.policyText.split(" ").length : 0, pageBytes: a.html.length, ...score(a.findings), createdAt: new Date(),
         timings: { total: ms(t0) },
       };
-      if (col) { const { insertedId } = await col.insertOne({ ...result }); result.auditId = insertedId; result.log.push(`Saved audit ${insertedId} to MongoDB Atlas`); }
-      else memory.set(`${host}|${mode}|${today()}`, result);
-      return Response.json({ ...result, cached: false, db: !!col });
+      return Response.json(await save(db, result));
     } catch (e) { return bad(e.message, 502); }
   }
 
@@ -146,7 +147,7 @@ Return JSON: {"policy_summary":"2 sentences on what the policy claims","findings
     const headers = privacyHeaders(page.headers);
     // Compare with the previous audit of this host to show tracker drift over time.
     let changes = null;
-    const prev = col ? await col.findOne({ host }, { sort: { createdAt: -1 }, projection: { createdAt: 1, "scan.trackers.vendor": 1, score: 1 } }).catch(() => null) : null;
+    const prev = await db.previous(host).catch(() => null);
     if (prev) {
       const before = new Set(prev.scan.trackers.map((t) => t.vendor)), now = new Set(scan.trackers.map((t) => t.vendor));
       changes = { since: prev.createdAt, previousScore: prev.score, added: [...now].filter((v) => !before.has(v)), removed: [...before].filter((v) => !now.has(v)) };
@@ -159,12 +160,7 @@ Return JSON: {"policy_summary":"2 sentences on what the policy claims","findings
       ...score(findings), createdAt: new Date(),
     };
     timings.total = ms(t0);
-    if (col) {
-      const { insertedId } = await col.insertOne({ ...result });
-      result.auditId = insertedId;
-      log.push(`Saved audit ${insertedId} to MongoDB Atlas`);
-    } else memory.set(`${host}|${mode}|${today()}`, result);
-    return Response.json({ ...result, cached: false, db: !!col });
+    return Response.json(await save(db, result));
   } catch (e) {
     return bad(e.message, 502);
   }
@@ -172,12 +168,11 @@ Return JSON: {"policy_summary":"2 sentences on what the policy claims","findings
 
 // Recent audits, shown as history on the page.
 export async function GET() {
-  const col = await audits().catch(() => null);
-  const rows = col
-    ? await col.find({}, { projection: { host: 1, url: 1, mode: 1, createdAt: 1, score: 1, grade: 1, findings: 1, approvedAt: 1 } }).sort({ createdAt: -1 }).limit(15).toArray()
-    : [...memory.values()].reverse();
+  const db = await store();
+  const rows = await db.recent(15);
+  const kind = (await store()).kind;
   return Response.json({
-    db: !!col,
-    audits: rows.map((r) => ({ id: r._id || r.host, host: r.host, mode: r.mode || "quick", url: r.url, createdAt: r.createdAt, score: r.score, grade: r.grade, verified: (r.findings || []).filter((f) => f.verified).length, approved: !!r.approvedAt })),
+    db: kind === "mongodb", storage: kind,
+    audits: rows.map((r) => ({ id: r._id || r.auditId || r.host, host: r.host, mode: r.mode || "quick", url: r.url, createdAt: r.createdAt, score: r.score, grade: r.grade, verified: (r.findings || []).filter((f) => f.verified).length, approved: !!r.approvedAt })),
   });
 }

@@ -233,7 +233,7 @@ export default function Home() {
             {res && <span className="hidden md:block"><Plate size="sm">{res.host}</Plate></span>}
             <div className="flex items-center gap-2">
               <span className={cn("hidden items-center gap-1.5 text-xs font-medium sm:inline-flex", history.db ? "text-pass" : "text-muted")}>
-                <Icon d={I.db} size={13} />{history.db ? "MongoDB Atlas" : "Local storage"}
+                <Icon d={I.db} size={13} />{history.db ? "MongoDB Atlas" : "JSON storage"}
               </span>
               <span className="hidden text-xs font-medium text-muted lg:inline">· UK GDPR · PECR</span>
               <Btn onClick={() => setShowHistory((s) => !s)} aria-expanded={showHistory} className="ml-2 min-h-9 px-3">
@@ -298,7 +298,7 @@ export default function Home() {
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }} className="pb-24 pt-8">
               {(res.cached || res.changes) && (
                 <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted no-print">
-                  {res.cached && <span className="inline-flex items-center gap-1.5"><Icon d={I.clock} size={14} />Today&apos;s test from {res.cacheSource === "browser" ? "this browser" : "MongoDB"} ({new Date(res.createdAt).toLocaleTimeString()}). No new model call.</span>}
+                  {res.cached && <span className="inline-flex items-center gap-1.5"><Icon d={I.clock} size={14} />Today&apos;s test from {res.cacheSource === "browser" ? "this browser" : res.storage === "json" ? "JSON storage" : "MongoDB"} ({new Date(res.createdAt).toLocaleTimeString()}). No new model call.</span>}
                   {res.changes && <span className="inline-flex items-center gap-1.5"><Icon d={I.refresh} size={14} />Since {new Date(res.changes.since).toLocaleDateString()} (score {res.changes.previousScore ?? "?"}): {res.changes.added.length ? `added ${res.changes.added.join(", ")}` : "no new trackers"}{res.changes.removed.length ? `; removed ${res.changes.removed.join(", ")}` : ""}.</span>}
                 </div>
               )}
@@ -718,7 +718,7 @@ function TestLog({ res, steps }) {
             ))}
             <li className="flex items-center gap-3 border-b border-rule py-2.5 text-sm">
               <span className="grid size-5 place-items-center rounded-full bg-ink text-white"><Icon d={I.db} size={11} /></span>
-              <span className="flex-1">Stored for audit trail</span><span className="text-muted">{res.auditId ? "MongoDB" : "browser"}</span>
+              <span className="flex-1">Stored for audit trail</span><span className="text-muted">{res.storage === "json" ? "JSON storage" : res.auditId ? "MongoDB" : "browser"}</span>
             </li>
           </ol>
         </div>
@@ -770,7 +770,7 @@ function History({ history, onOpen }) {
     <div>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-xl font-extrabold tracking-[-0.02em]">Test history</h2>
-        <p className="text-sm text-muted">{history.db ? "Stored in MongoDB Atlas" : "Stored on this server instance"}. Tests from today open instantly.</p>
+        <p className="text-sm text-muted">{history.db ? "Stored in MongoDB Atlas" : "MongoDB is unreachable, so tests are stored as JSON on the server"}. Tests from today open instantly.</p>
       </div>
       {!history.audits.length && <p className="mt-4 text-muted">No tests yet. Run one above.</p>}
       <ul className="mt-4 grid gap-px bg-rule sm:grid-cols-2 lg:grid-cols-3">
