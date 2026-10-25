@@ -128,3 +128,16 @@ pre { background: var(--bg); padding: 12px; border-radius: 10px; font-size: 12px
 
 .foot { color: var(--muted); font-size: 12px; padding: 32px 0; text-align: center; }
 @media print { .side, .search, .examples, .actions, .banner .ghost, .top-meta, .seg-ctl, .finding input { display: none !important; } .layout { grid-template-columns: 1fr; } .card, .kpi { box-shadow: none; break-inside: avoid; } }
+
+/* Navbar with tabs */
+.top { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); margin: 0 -16px; padding: 12px 16px; }
+.tabs { display: flex; gap: 2px; overflow-x: auto; flex: 1; justify-content: center; }
+.tabs button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--muted); padding: 8px 12px; border-radius: 8px; font-weight: 600; font-size: 14px; white-space: nowrap; transition: background .2s, color .2s; }
+.tabs button:hover:not(:disabled) { background: var(--surface); color: var(--fg); }
+.tabs button.on { background: var(--surface); color: var(--primary); box-shadow: var(--shadow); }
+.count { font-size: 11px; padding: 0 6px; border-radius: 99px; background: var(--line); color: var(--muted); }
+.tabs button.on .count { background: var(--primary); color: #fff; }
+.layout { grid-template-columns: 1fr; }
+.side { position: static; margin-top: 16px; }
+.mini { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+@media (max-width: 768px) { .tabs { order: 3; flex-basis: 100%; justify-content: flex-start; } }

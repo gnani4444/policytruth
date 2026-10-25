@@ -8,6 +8,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 const EXAMPLES = ["theguardian.com", "asos.com", "bbc.co.uk", "monzo.com"];
+const TABS = [["overview", "Overview"], ["findings", "Findings"], ["trackers", "Trackers"], ["fixes", "Fixes"], ["history", "History"], ["about", "How it works"]];
 const ISSUE = { undisclosed: "Undisclosed", pre_consent: "Loads before consent", vague_disclosure: "Vague disclosure" };
 
 async function post(body) {
@@ -82,6 +83,7 @@ export default function Home() {
   const [history, setHistory] = useState({ audits: [], db: false });
   const [sev, setSev] = useState("all");
   const [copied, setCopied] = useState("");
+  const [tab, setTab] = useState("overview");
 
   const loadHistory = () => fetch("/api/audit").then((r) => r.json()).then(setHistory).catch(() => {});
   useEffect(() => { loadHistory(); }, []);
@@ -93,19 +95,19 @@ export default function Home() {
     const key = `pt:${host}:${today()}`;
     // Browser cache first: an audit of this host from today is reused without a network call.
     const local = !force && store.get(key);
-    if (local) { setRes({ ...local, cached: true, cacheSource: "browser" }); return; }
+    if (local) { setRes({ ...local, cached: true, cacheSource: "browser" }); setTab("overview"); return; }
     setBusy("audit"); setRes(null);
     try {
       const r = await post({ url: target, force });
       const out = { ...r, cacheSource: r.cached ? "server" : null };
-      setRes(out); store.set(key, r); loadHistory();
+      setRes(out); store.set(key, r); loadHistory(); setTab("overview");
     } catch (e) { setErr(e.message); }
     setBusy("");
   }
 
   async function draftFixes() {
     setBusy("fix"); setErr("");
-    try { setFix(await post({ action: "fix", url: res.url, auditId: res.auditId, findings: res.findings.filter((f, i) => approved[i]) })); }
+    try { setFix(await post({ action: "fix", url: res.url, auditId: res.auditId, findings: res.findings.filter((f, i) => approved[i]) })); setTab("fixes"); }
     catch (e) { setErr(e.message); }
     setBusy("");
   }
@@ -134,6 +136,13 @@ export default function Home() {
     <div className="shell">
       <header className="top">
         <div className="brand"><span className="logo"><Icon d={I.shield} size={18} /></span>PolicyTruth</div>
+        <nav className="tabs" aria-label="Sections">
+          {TABS.map(([id, label]) => {
+            const count = id === "findings" && m ? m.verified.length : id === "trackers" && m ? m.trackers : id === "history" ? history.audits.length : null;
+            const off = !res && !["overview", "history", "about"].includes(id);
+            return <button key={id} className={tab === id ? "on" : ""} aria-current={tab === id ? "page" : undefined} disabled={off} onClick={() => setTab(id)}>{label}{count != null && <span className="count">{count}</span>}</button>;
+          })}
+        </nav>
         <div className="top-meta">
           <span className={`chip ${history.db ? "ok" : ""}`}><Icon d={I.db} size={13} />{history.db ? "MongoDB Atlas connected" : "Local storage mode"}</span>
           <span className="chip">UK GDPR · PECR</span>
@@ -142,7 +151,7 @@ export default function Home() {
 
       <div className="layout">
         <main>
-          <section className="hero">
+          {tab === "overview" && <section className="hero">
             <h1>Does your website do what your privacy policy says?</h1>
             <p className="lead">PolicyTruth compares the trackers your site actually loads with the promises in your privacy policy. Gemini finds the gaps, a verifier rejects anything it cannot prove, and you approve every fix.</p>
             <form onSubmit={(e) => { e.preventDefault(); audit(url); }} className="search">
@@ -150,8 +159,8 @@ export default function Home() {
               <button className="primary" disabled={!!busy}>{busy === "audit" ? <><span className="spin" />Auditing</> : "Run audit"}</button>
             </form>
             <div className="examples">Try: {EXAMPLES.map((e) => <button key={e} className="link" onClick={() => audit(e)} disabled={!!busy}>{e}</button>)}</div>
-            {err && <div className="alert"><Icon d={I.alert} />{err}</div>}
-          </section>
+          </section>}
+          {err && <div className="alert"><Icon d={I.alert} />{err}</div>}
 
           {busy === "audit" && (
             <section className="card skeleton-card" aria-live="polite">
@@ -162,11 +171,12 @@ export default function Home() {
 
           {res && m && (
             <>
-              {res.cached && (
+              {tab === "overview" && res.cached && (
                 <div className="banner"><Icon d={I.clock} />Showing today&apos;s audit from {res.cacheSource === "browser" ? "this browser" : "MongoDB"} ({new Date(res.createdAt).toLocaleTimeString()}). No new model call was made.
                   <button className="ghost" onClick={() => audit(res.url, true)}><Icon d={I.refresh} size={14} />Re-run now</button></div>
               )}
 
+              {tab === "overview" && <>
               <section className="card overview">
                 <Gauge score={res.score ?? 0} grade={res.grade ?? "?"} />
                 <div className="overview-text">
@@ -192,8 +202,9 @@ export default function Home() {
                 <Kpi label="Audit time" value={res.timings?.total ? `${(res.timings.total / 1000).toFixed(1)}s` : "-"} sub={`page ${Math.round((res.pageBytes || 0) / 1024)} KB`} />
               </section>
 
+              </>}
               <div className="two">
-                <section className="card">
+                {tab === "trackers" && <section className="card">
                   <h3>Tracker inventory</h3>
                   <table>
                     <thead><tr><th>Vendor</th><th>Consent gate</th><th>In policy</th></tr></thead>
@@ -208,10 +219,10 @@ export default function Home() {
                       {!res.scan.trackers.length && <tr><td colSpan="3" className="muted">No known trackers in the page source.</td></tr>}
                     </tbody>
                   </table>
-                  {!!m.hosts && <details><summary>All third-party script hosts ({m.hosts})</summary><div className="hosts">{res.scan.scriptHosts.map((h) => <code key={h}>{h}</code>)}</div></details>}
-                </section>
+                  {!!m.hosts && <details open><summary>All third-party script hosts ({m.hosts})</summary><div className="hosts">{res.scan.scriptHosts.map((h) => <code key={h}>{h}</code>)}</div></details>}
+                </section>}
 
-                <section className="card">
+                {tab === "overview" && <section className="card">
                   <h3>Pipeline and verification loop</h3>
                   <ol className="steps">
                     {steps.map(([name, t]) => <li key={name}><span className="dot"><Icon d={I.check} size={12} /></span><span>{name}</span><span className="mono">{t != null ? `${t} ms` : "cached"}</span></li>)}
@@ -223,10 +234,16 @@ export default function Home() {
                     {!m.verified.length && <div className="seg none">No verified issues</div>}
                   </div>
                   <details><summary>Run log</summary><div className="log">{res.log.map((l, i) => <div key={i}>{l}</div>)}</div></details>
-                </section>
+                </section>}
+                {tab === "overview" && <section className="card">
+                  <h3>Top findings</h3>
+                  {m.verified.slice(0, 4).map((f, i) => <div key={i} className="mini"><span className={`tag ${f.severity === "high" ? "bad" : f.severity === "medium" ? "warn" : ""}`}>{f.severity}</span><span><b>{f.vendor}</b> · {ISSUE[f.issue] || f.issue}</span></div>)}
+                  {!m.verified.length && <p className="empty">No verified findings.</p>}
+                  <button className="ghost" style={{ marginTop: 12 }} onClick={() => setTab("findings")}>Review and approve findings</button>
+                </section>}
               </div>
 
-              <section className="card">
+              {tab === "findings" && <><section className="card">
                 <div className="card-head">
                   <h3>Verified findings <span className="muted">({m.verified.length})</span></h3>
                   <div className="seg-ctl" role="tablist" aria-label="Filter by severity">
@@ -261,9 +278,10 @@ export default function Home() {
                   <p className="muted">Gemini proposed these, but the evidence did not support them, so they are not reported as findings.</p>
                   {m.rejected.map((f, i) => <div key={i} className="rejected"><Icon d={I.x} size={14} /><b>{f.vendor}</b> · {ISSUE[f.issue] || f.issue}<span className="muted"> · {f.rejected_because.join("; ")}</span></div>)}
                 </section>
-              )}
+              )}</>}
 
-              {fix && (
+              {tab === "fixes" && !fix && <section className="card"><h3>Fixes</h3><p className="empty">No fixes drafted yet. Approve findings in the Findings tab first.</p><button className="ghost" onClick={() => setTab("findings")}>Go to findings</button></section>}
+              {tab === "fixes" && fix && (
                 <section className="card">
                   <h3>Draft fixes <span className="muted">for human review before shipping</span></h3>
                   <p>{fix.summary}</p>
@@ -281,16 +299,15 @@ export default function Home() {
             </>
           )}
 
-          {!res && !busy && (
+          {(tab === "about" || (tab === "overview" && !res && !busy)) && (
             <section className="features">
               {[["Real evidence", "Reads the page source and finds 15 tracker vendors and 8 consent managers."], ["Gemini reasoning", "Gemini reads your entire privacy policy and compares it with what the site loads."], ["Verification loop", "Every model claim is checked against evidence. Unsupported claims are rejected."], ["Human approval", "You approve each finding before any fix is drafted. Every step is stored."]].map(([t, d]) => (
                 <div key={t} className="feature"><span className="logo small"><Icon d={I.shield} size={14} /></span><b>{t}</b><p className="muted">{d}</p></div>
               ))}
             </section>
           )}
-        </main>
 
-        <aside className="side">
+        {tab === "history" && <section className="card side">
           <h3>Audit history</h3>
           <p className="muted small">{history.db ? "Stored in MongoDB Atlas" : "Stored on this server instance"}. Audits from today load instantly.</p>
           {history.audits.map((a) => (
@@ -300,7 +317,8 @@ export default function Home() {
             </button>
           ))}
           {!history.audits.length && <p className="empty">No audits yet.</p>}
-        </aside>
+        </section>}
+        </main>
       </div>
       <footer className="foot">PolicyTruth drafts suggestions for human review. It is not legal advice. Built with Gemini and MongoDB Atlas at Encode London 2026.</footer>
     </div>
