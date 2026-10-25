@@ -44,7 +44,7 @@
     ],
     "repository": {
       "url": "https://github.com/gnani4444/policytruth",
-      "revision": "f0ef52a3cf7e8a40206f36712b2f8381b512a430"
+      "revision": "b5fdcedbc9bf1c01ba130a1dbcc72e0abfe05344"
     }
   },
   "components": [
@@ -290,7 +290,8 @@
       "to": "mongo",
       "label": "store + cache",
       "fromSide": "top",
-      "toSide": "bottom"
+      "toSide": "bottom",
+      "labelDx": 48
     },
     {
       "id": "agent-scanner",
@@ -322,7 +323,9 @@
       "from": "api",
       "to": "json",
       "label": "fallback",
-      "variant": "dashed"
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "right"
     }
   ],
   "cards": [

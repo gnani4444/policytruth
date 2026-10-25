@@ -68,29 +68,9 @@ The **Test log** shows every tool call the agent made, in order, with its stated
 
 <img src="docs/images/agent-trace.png" alt="Agent trace: inspect_page and read_policy calls across theguardian.com, ending in submit_findings" width="100%" />
 
-### Inspection
+### Inspection, fixes and history
 
-The tracker inventory (consent gate and policy disclosure for each vendor), the UK GDPR Article 13 checklist, policy quality and privacy response headers.
-
-<img src="docs/images/inspection.png" alt="Inspection view with tracker inventory, Article 13 checklist and policy quality" width="100%" />
-
-### Approve, then fix
-
-Gemini drafts a consent-gated script for each approved defect and the exact paragraph to add to the privacy policy. Copy buttons on every fix; export the whole test as Markdown, JSON or PDF.
-
-<img src="docs/images/fixes.png" alt="Draft fixes: a consent-gated script and a privacy policy addition" width="100%" />
-
-### History and mobile
-
-Every test is stored in MongoDB Atlas. Tests from today open instantly from the history drawer, with no new model call.
-
-<table>
-<tr>
-<td width="62%"><img src="docs/images/history.png" alt="Test history drawer listing recent tests with grades" /></td>
-<td width="19%"><img src="docs/images/mobile-landing.png" alt="Landing page on a phone" /></td>
-<td width="19%"><img src="docs/images/mobile-certificate.png" alt="Certificate on a phone, verdict first" /></td>
-</tr>
-</table>
+**Inspection** lists every tracker with its consent gate and policy disclosure, the UK GDPR Article 13 checklist, policy quality and privacy headers. After you approve defects, **Fixes** holds a consent-gated script for each one and the exact paragraph to add to the privacy policy, with copy buttons and Markdown, JSON or PDF export. **Test history** sits in the header; tests from today open instantly with no new model call.
 
 ## Quick start
 
@@ -114,11 +94,23 @@ Set these in `.env.local`, or as environment variables on Vercel.
 |---|---|---|
 | `GEMINI_API_KEY` | Yes | Gemini API key from Google AI Studio. |
 | `GEMINI_MODEL` | No | Model id. Default `gemini-4-argon`. |
-| `MONGODB_URI` | No | Atlas connection string. Without it, audits are cached in server memory only. |
+| `MONGODB_URI` | No | Atlas connection string. Without it, or when Atlas is unreachable, audits go to JSON storage (see below). |
+| `PT_DATA_FILE` | No | Path of the JSON storage file. Default `.data/audits.json` locally, `/tmp/policytruth-audits.json` on Vercel. |
 
 If the database password contains `@`, `:`, `/`, `?`, `#` or `%`, URL-encode it (for example `@` becomes `%40`).
 
 For Vercel, allow access from anywhere (`0.0.0.0/0`) in Atlas Network Access, because Vercel functions have no fixed outbound IP.
+
+### When MongoDB is offline
+
+The app keeps working without Atlas. `lib/db.js` gives the API one storage interface:
+
+- **Atlas** when `MONGODB_URI` is set and reachable.
+- **JSON storage** otherwise: audits, approvals and fixes are written to a JSON file and cached in memory. A read-only snapshot of recent audits (`data/audits.seed.json`) is bundled with the app, so history works on a cold start.
+- If an Atlas call fails mid-request, that call falls back to JSON and Atlas is skipped for 60 seconds instead of timing out on every request.
+- The browser also caches today's tests in `localStorage`.
+
+On Vercel the JSON file lives in `/tmp`, which belongs to one function instance and is cleared when the instance is recycled. It keeps the demo running during an outage; it is not durable storage. Audits written to JSON are not copied back to Atlas.
 
 ## Features
 
@@ -192,7 +184,7 @@ URL ──> fetch page + headers ──> find policy link ──> fetch policy
 | `lib/scan.js` | Tracker and consent-manager detection, policy link finder, verifier. |
 | `lib/policy.js` | Article 13 checklist, readability, last-updated date, privacy headers. |
 | `lib/agent.js` | Agent mode: Gemini function-calling loop, same-site tools, verifier feedback round. |
-| `lib/db.js` | Cached MongoDB connection that retries after a failure. |
+| `lib/db.js` | Storage: MongoDB Atlas, with JSON-file fallback and a bundled seed when Atlas is unreachable. |
 
 ## API
 
