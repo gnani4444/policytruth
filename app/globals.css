@@ -141,3 +141,6 @@ pre { background: var(--bg); padding: 12px; border-radius: 10px; font-size: 12px
 .side { position: static; margin-top: 16px; }
 .mini { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
 @media (max-width: 768px) { .tabs { order: 3; flex-basis: 100%; justify-content: flex-start; } }
+.banner.info { background: color-mix(in srgb, var(--primary) 10%, var(--surface)); color: var(--fg); }
+.mini b { min-width: 96px; }
+.mini code { margin-left: auto; word-break: break-all; }

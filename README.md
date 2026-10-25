@@ -2,48 +2,137 @@
 
 **Does your website do what your privacy policy says?**
 
-Live: https://policytruth-seven.vercel.app
+PolicyTruth audits a website against its own privacy policy. A deterministic scanner records which trackers the site loads. Gemini compares that evidence with the full policy text. A verifier rejects every claim it cannot prove. A human approves each finding before any fix is drafted. Every audit is stored in MongoDB Atlas as an audit trail.
 
-PolicyTruth loads a website, records which trackers it actually loads, and compares that with the site's own privacy policy.
-Gemini finds the mismatches. A deterministic verifier rejects any claim it cannot back with evidence.
-A human approves each finding before Gemini drafts a fix. Every audit, approval and fix is stored in MongoDB Atlas as an audit trail.
+- Live: https://policytruth-seven.vercel.app
+- Built at Encode London 2026 for the Google DeepMind, MongoDB and Agents That Ship challenges.
 
-## Who it is for
+## Why it exists
 
-A UK startup founder or DPO who copied a privacy policy template, added Meta Pixel, Hotjar and Google Analytics, and never checked whether the two still match.
+Under UK GDPR and PECR, non-essential trackers need consent before they load, and the privacy policy must name who receives the data. The ICO actively reviews cookie compliance on major UK sites.
 
-## Why it matters
+In practice, marketing teams add pixels through tag managers every week, and the privacy policy is a template nobody re-reads. Existing tools solve half the problem: cookie scanners list cookies but never read the policy, and policy generators write text but never look at the site.
 
-- **The law requires it.** Under UK GDPR and PECR, non-essential cookies and trackers need prior consent, and the privacy policy must name who receives the data.
-- **Regulators are checking.** The ICO has been reviewing cookie compliance on the UK's most visited sites and has written to companies that load advertising trackers before consent.
-- **Policies drift.** Marketing teams add pixels through tag managers every week. Nobody re-reads the policy, so it goes out of date silently.
-- **Existing tools stop halfway.** Cookie scanners list cookies but do not read the policy. Policy generators write text but never look at the site. We found only a research prototype (University of Turku) that compares the two.
-- **Sellable now.** Every company with a website and a privacy policy is a customer: agencies, DPO-as-a-service firms, and law firms that run compliance audits.
+PolicyTruth is for the UK startup founder or DPO who needs to know, today, whether the site and the policy match.
+
+## Quick start
+
+Requirements: Node.js 20+, a Gemini API key, and optionally a MongoDB Atlas cluster.
+
+```bash
+git clone https://github.com/gnani4444/policytruth.git
+cd policytruth
+npm install
+cp .env.example .env.local   # then fill in the values below
+npm run dev                  # open http://localhost:3000
+```
+
+Enter a domain such as `theguardian.com` and press **Run audit**. The first audit takes about 25 seconds.
+
+## Configuration
+
+Set these in `.env.local`, or as environment variables on Vercel.
+
+| Variable | Required | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | Yes | Gemini API key from Google AI Studio. |
+| `GEMINI_MODEL` | No | Model id. Default `gemini-4-argon`. |
+| `MONGODB_URI` | No | Atlas connection string. Without it, audits are cached in server memory only. |
+
+If the database password contains `@`, `:`, `/`, `?`, `#` or `%`, URL-encode it (for example `@` becomes `%40`).
+
+For Vercel, allow access from anywhere (`0.0.0.0/0`) in Atlas Network Access, because Vercel functions have no fixed outbound IP.
+
+## Features
+
+**Audit pipeline**
+- Fetches the page and finds its privacy policy link.
+- Detects 15 tracker vendors (Meta Pixel, Google Analytics, Google Tag Manager, Google Ads, TikTok, LinkedIn, X, Hotjar, Microsoft Clarity, Segment, Mixpanel, HubSpot, Intercom, Pinterest, Snap).
+- Detects 8 consent managers (OneTrust, Cookiebot, Didomi, Usercentrics, Osano, CookieYes, Termly, Google Consent Mode).
+- Records for each tracker whether its script is consent-gated, and whether the policy names the vendor.
+
+**Gemini reasoning, then verification**
+- Gemini reads the full policy (up to 400,000 characters) and the scan. It proposes findings of three types: `undisclosed`, `pre_consent` and `vague_disclosure`, each with an exact policy quote.
+- The verifier rejects a finding when the tracker is not in the page source, when the evidence contradicts it, when the quoted text is not in the policy, or when the policy could not be fetched. Rejected claims are shown with the reason.
+
+**Human in control**
+- The reviewer ticks the findings to act on. Gemini drafts fixes only for those: consent-gated script snippets and a privacy policy addition.
+- Nothing is changed on the audited website.
+
+**Metrics**
+- Compliance score from 0 to 100, with a grade from A to F.
+- Trackers detected, % consent-gated, % named in the policy.
+- Verified findings by severity, and the share of model claims that survived the verifier.
+- UK GDPR Article 13 coverage: 9 required items, such as lawful basis, retention, rights, withdrawing consent, the ICO complaint right and international transfers.
+- Policy readability (Flesch reading ease), length and last-updated date with age in days.
+- Privacy-related headers: `Referrer-Policy`, `Permissions-Policy`, `Strict-Transport-Security`.
+- Per-step timings: fetch, policy, scan, Gemini, verifier.
+- Tracker changes since the previous audit of the same site (needs MongoDB).
+
+**Workflow**
+- Tabs: Overview, Findings, Trackers, Policy, Fixes, History, How it works.
+- Same-day cache: an audit of the same site from today loads from the browser or MongoDB, with no new model call. **Re-run now** forces a fresh audit.
+- Exports: Markdown report, raw JSON, print to PDF. Copy buttons on every fix.
 
 ## How it works
 
-1. **Scan** (`lib/scan.js`, deterministic). Fetch the page and find the privacy policy link. Detect 15 tracker vendors and 8 consent managers. Record whether each tracker's script is consent-gated, and whether the policy names the vendor.
-2. **Reason** (Gemini, `gemini-4-argon`, `thinkingLevel: high`). Read the full policy text and the scan. Return mismatches: `undisclosed`, `pre_consent`, `vague_disclosure`, each with an exact policy quote.
-3. **Verify** (`verify()` in `lib/scan.js`). Reject any finding whose tracker is not in the page source. Reject any finding that the evidence contradicts, for example "undisclosed" when the policy names the vendor. Reject any finding whose policy quote does not appear in the policy. Rejected claims are shown separately, with the reason.
-4. **Human approval.** The reviewer ticks the findings to act on. Nothing is generated for unticked findings, and nothing is changed on the live site.
-5. **Fix** (Gemini). For approved findings only: consent-gated script snippets (or Google Consent Mode defaults) and a privacy policy addition.
-6. **Store** (MongoDB Atlas, database `policytruth`, collection `audits`). Each audit document holds the scan, findings, verifier verdicts, approvals and drafted fixes. The page shows recent audit history.
+```text
+URL ──> fetch page + headers ──> find policy link ──> fetch policy
+                │
+                ▼
+     deterministic scan (lib/scan.js)        policy checks (lib/policy.js)
+     trackers, consent gating, disclosure    Article 13, readability, age
+                │
+                ▼
+     Gemini analysis (gemini-4-argon, thinkingLevel "high", JSON output)
+                │
+                ▼
+     verifier: keep only claims backed by evidence
+                │
+                ▼
+     human approves findings ──> Gemini drafts fixes
+                │
+                ▼
+     MongoDB Atlas: policytruth.audits (scan, findings, verdicts, approvals, fixes)
+```
 
-## Models and agents used
+| Path | Purpose |
+|---|---|
+| `app/page.js` | Dashboard UI (client component). |
+| `app/api/audit/route.js` | `POST` runs an audit or drafts fixes; `GET` returns recent audits. |
+| `lib/scan.js` | Tracker and consent-manager detection, policy link finder, verifier. |
+| `lib/policy.js` | Article 13 checklist, readability, last-updated date, privacy headers. |
+| `lib/db.js` | Cached MongoDB connection that retries after a failure. |
 
-- `gemini-4-argon` via `@google/genai` `models.generateContent`, JSON output, `thinkingConfig.thinkingLevel: "high"`. Model is configurable with `GEMINI_MODEL`.
-- Two Gemini steps: an analysis step (policy + scan, long context) and a fix-drafting step that runs only after human approval.
-- Verification loop: deterministic evidence check on every model claim (`lib/scan.test.js`).
+## API
 
-## Run locally
+`POST /api/audit`
+
+```json
+{ "url": "theguardian.com", "force": false }
+```
+
+Returns the scan, findings (each with `verified` and `rejected_because`), `score`, `grade`, `policy`, `headers`, `changes`, `timings`, `log` and `auditId`. With `force: false`, an audit of the same host from today is returned with `cached: true`.
+
+`POST /api/audit` (draft fixes)
+
+```json
+{ "action": "fix", "url": "https://theguardian.com/", "auditId": "<id>", "findings": [ ...approved findings ] }
+```
+
+Returns `code_fixes`, `policy_redline` and `summary`. The approval and fixes are saved on the audit document.
+
+`GET /api/audit` returns the 15 most recent audits.
+
+Errors return `{ "error": "<message>" }` with status 400 (bad input), 500 (missing key) or 502 (upstream fetch or model failure).
+
+## Tests
 
 ```bash
-cd policytruth
-npm install
-cp .env.example .env.local   # fill GEMINI_API_KEY and MONGODB_URI
-npm run dev                  # http://localhost:3000
-npm test                     # scanner + verifier tests
+npm test
 ```
+
+Covers tracker detection, consent gating, disclosure matching, verifier rejections, Article 13 coverage and policy age.
 
 ## Deploy
 
@@ -53,8 +142,16 @@ vercel env add MONGODB_URI production
 vercel deploy --prod
 ```
 
-## Limits (honest)
+## Limits
 
-- Static HTML only: trackers injected later by a tag manager at runtime are not seen. Next step is a headless browser with a network log, before and after consent.
-- Vendor detection uses a fixed signature list of 15 vendors.
-- Drafts are suggestions for a human to review. This is not legal advice.
+- The scanner reads static HTML. Trackers that a tag manager injects at runtime are not seen.
+- Policies rendered by JavaScript may return little text, which lowers coverage and readability accuracy.
+- The Article 13 checklist uses keyword matching. A missing item is a prompt for review, not proof of a breach.
+- Drafted fixes are suggestions for human review. PolicyTruth is not legal advice.
+
+## Roadmap
+
+- Headless browser capture of network traffic before and after consent.
+- Atlas Vector Search over past findings and ICO guidance.
+- Scheduled re-audits with alerts when the site or policy changes.
+- Open a GitHub pull request with the approved fix.

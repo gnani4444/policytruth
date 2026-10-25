@@ -8,7 +8,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 const EXAMPLES = ["theguardian.com", "asos.com", "bbc.co.uk", "monzo.com"];
-const TABS = [["overview", "Overview"], ["findings", "Findings"], ["trackers", "Trackers"], ["fixes", "Fixes"], ["history", "History"], ["about", "How it works"]];
+const TABS = [["overview", "Overview"], ["findings", "Findings"], ["trackers", "Trackers"], ["policy", "Policy"], ["fixes", "Fixes"], ["history", "History"], ["about", "How it works"]];
 const ISSUE = { undisclosed: "Undisclosed", pre_consent: "Loads before consent", vague_disclosure: "Vague disclosure" };
 
 async function post(body) {
@@ -171,6 +171,9 @@ export default function Home() {
 
           {res && m && (
             <>
+              {tab === "overview" && res.changes && (
+                <div className="banner info"><Icon d={I.refresh} />Since the last audit ({new Date(res.changes.since).toLocaleDateString()}, score {res.changes.previousScore ?? "?"}): {res.changes.added.length ? `added ${res.changes.added.join(", ")}` : "no new trackers"}{res.changes.removed.length ? `; removed ${res.changes.removed.join(", ")}` : ""}.</div>
+              )}
               {tab === "overview" && res.cached && (
                 <div className="banner"><Icon d={I.clock} />Showing today&apos;s audit from {res.cacheSource === "browser" ? "this browser" : "MongoDB"} ({new Date(res.createdAt).toLocaleTimeString()}). No new model call was made.
                   <button className="ghost" onClick={() => audit(res.url, true)}><Icon d={I.refresh} size={14} />Re-run now</button></div>
@@ -199,6 +202,10 @@ export default function Home() {
                 <Kpi label="Rejected by verifier" value={m.rejected.length} sub={`${m.precision}% of model claims survived`} />
                 <Kpi label="Consent manager" value={res.scan.cmp[0] || "None"} sub={res.scan.cmp.length > 1 ? res.scan.cmp.slice(1).join(", ") : "detected in page source"} tone={res.scan.cmp.length ? "ok" : "bad"} />
                 <Kpi label="Policy length" value={res.policyWords ? res.policyWords.toLocaleString() : "Not found"} sub={res.policyWords ? `words · ~${Math.ceil(res.policyWords / 230)} min read` : "policy page unreachable"} tone={res.policyWords ? "" : "bad"} />
+                {res.policy && <Kpi label="Article 13 coverage" value={`${res.policy.coverage}%`} sub={`${res.policy.article13.filter((i) => i.present).length} of ${res.policy.article13.length} required items`} tone={res.policy.coverage >= 80 ? "ok" : res.policy.coverage >= 50 ? "warn" : "bad"} />}
+                {res.policy && <Kpi label="Readability" value={res.policy.readability ? res.policy.readability.score : "-"} sub={res.policy.readability ? `Flesch · ${res.policy.readability.label}` : "policy too short or missing"} tone={res.policy.readability?.score >= 50 ? "ok" : "warn"} />}
+                {res.policy && <Kpi label="Policy age" value={res.policy.updated ? `${res.policy.updated.ageDays}d` : "Unknown"} sub={res.policy.updated ? `last updated ${res.policy.updated.date}` : "no last-updated date found"} tone={!res.policy.updated || res.policy.updated.ageDays > 365 ? "warn" : "ok"} />}
+                {res.headers && <Kpi label="Privacy headers" value={`${res.headers.filter((h) => h.value).length}/${res.headers.length}`} sub={res.headers.filter((h) => !h.value).map((h) => h.label).join(", ") || "all present"} tone={res.headers.every((h) => h.value) ? "ok" : "warn"} />}
                 <Kpi label="Audit time" value={res.timings?.total ? `${(res.timings.total / 1000).toFixed(1)}s` : "-"} sub={`page ${Math.round((res.pageBytes || 0) / 1024)} KB`} />
               </section>
 
@@ -279,6 +286,26 @@ export default function Home() {
                   {m.rejected.map((f, i) => <div key={i} className="rejected"><Icon d={I.x} size={14} /><b>{f.vendor}</b> · {ISSUE[f.issue] || f.issue}<span className="muted"> · {f.rejected_because.join("; ")}</span></div>)}
                 </section>
               )}</>}
+
+              {tab === "policy" && (
+                <div className="two">
+                  <section className="card">
+                    <h3>UK GDPR Article 13 checklist</h3>
+                    {!res.policy && <p className="empty">Re-run this audit to see policy checks.</p>}
+                    {res.policy?.article13.map((c) => <div key={c.id} className="mini">{c.present ? <span className="tag ok"><Icon d={I.check} size={12} />Found</span> : <span className="tag bad"><Icon d={I.x} size={12} />Missing</span>}<span>{c.label}</span></div>)}
+                    <p className="muted small">Keyword check of the policy text. A missing item is a prompt for review, not proof of a breach.</p>
+                  </section>
+                  <section className="card">
+                    <h3>Policy quality</h3>
+                    <div className="mini"><b>Source</b><a href={res.policyUrl} target="_blank" rel="noreferrer" className="mono small">{res.policyUrl}</a></div>
+                    <div className="mini"><b>Length</b><span>{res.policyWords?.toLocaleString() || 0} words</span></div>
+                    <div className="mini"><b>Readability</b><span>{res.policy?.readability ? `${res.policy.readability.score} (${res.policy.readability.label})` : "n/a"}</span></div>
+                    <div className="mini"><b>Last updated</b><span>{res.policy?.updated ? `${res.policy.updated.date} (${res.policy.updated.ageDays} days ago)` : "not stated"}</span></div>
+                    <h4>Privacy-related response headers</h4>
+                    {res.headers?.map((h) => <div key={h.id} className="mini">{h.value ? <span className="tag ok"><Icon d={I.check} size={12} />Set</span> : <span className="tag warn"><Icon d={I.x} size={12} />Missing</span>}<span>{h.label}</span>{h.value && <code className="small">{h.value.slice(0, 60)}</code>}</div>)}
+                  </section>
+                </div>
+              )}
 
               {tab === "fixes" && !fix && <section className="card"><h3>Fixes</h3><p className="empty">No fixes drafted yet. Approve findings in the Findings tab first.</p><button className="ghost" onClick={() => setTab("findings")}>Go to findings</button></section>}
               {tab === "fixes" && fix && (

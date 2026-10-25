@@ -5,7 +5,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test lib/scan.test.js"
+    "test": "node --test lib/scan.test.js lib/policy.test.js"
   },
   "dependencies": {
     "@google/genai": "latest",

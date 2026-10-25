@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { ObjectId } from "mongodb";
 import { detect, findPolicyUrl, htmlToText, verify } from "../../../lib/scan.js";
 import { audits } from "../../../lib/db.js";
+import { policyChecks, privacyHeaders } from "../../../lib/policy.js";
 
 export const maxDuration = 60;
 
@@ -16,7 +17,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 async function get(url) {
   const r = await fetch(url, { headers: { "user-agent": UA, accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(12000) });
   if (!r.ok) throw new Error(`${url} returned HTTP ${r.status}`);
-  return (await r.text()).slice(0, 2_000_000);
+  const text = (await r.text()).slice(0, 2_000_000);
+  return { text, headers: r.headers };
 }
 
 async function gemini(prompt) {
@@ -81,14 +83,15 @@ Return JSON: {"code_fixes":[{"tracker_id":"","explanation":"","snippet":"HTML/JS
   const t0 = performance.now();
   try {
     let t = performance.now();
-    const html = await get(url.toString());
+    const page = await get(url.toString());
+    const html = page.text;
     timings.fetch = ms(t);
     log.push(`Fetched ${url} (${html.length.toLocaleString()} bytes)`);
 
     t = performance.now();
     const policyUrl = body.policyUrl || findPolicyUrl(html, url);
     let policyText = "";
-    try { policyText = htmlToText(await get(policyUrl)).slice(0, 400_000); log.push(`Fetched privacy policy ${policyUrl} (${policyText.length.toLocaleString()} chars)`); }
+    try { policyText = htmlToText((await get(policyUrl)).text).slice(0, 400_000); log.push(`Fetched privacy policy ${policyUrl} (${policyText.length.toLocaleString()} chars)`); }
     catch (e) { log.push(`Privacy policy not reachable at ${policyUrl}: ${e.message}`); }
     timings.policy = ms(t);
 
@@ -117,7 +120,17 @@ Return JSON: {"policy_summary":"2 sentences on what the policy claims","findings
     timings.verify = ms(t);
     log.push(`Gemini proposed ${findings.length} findings; verifier confirmed ${findings.filter((f) => f.verified).length}, rejected ${findings.filter((f) => !f.verified).length}`);
 
+    const policy = policyChecks(policyText);
+    const headers = privacyHeaders(page.headers);
+    // Compare with the previous audit of this host to show tracker drift over time.
+    let changes = null;
+    const prev = col ? await col.findOne({ host }, { sort: { createdAt: -1 }, projection: { createdAt: 1, "scan.trackers.vendor": 1, score: 1 } }).catch(() => null) : null;
+    if (prev) {
+      const before = new Set(prev.scan.trackers.map((t) => t.vendor)), now = new Set(scan.trackers.map((t) => t.vendor));
+      changes = { since: prev.createdAt, previousScore: prev.score, added: [...now].filter((v) => !before.has(v)), removed: [...before].filter((v) => !now.has(v)) };
+    }
     const result = {
+      policy, headers, changes,
       url: url.toString(), host, policyUrl, model: MODEL, scan, findings, log, timings,
       policy_summary: analysis.policy_summary, risk_summary: analysis.risk_summary,
       policyWords: policyText ? policyText.split(" ").length : 0, pageBytes: html.length,
