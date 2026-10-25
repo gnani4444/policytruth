@@ -1,0 +1,316 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "PolicyTruth Architecture",
+    "locale": "en",
+    "output": "architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "agent-loop",
+        "label": "Agent loop",
+        "focus": [
+          "api",
+          "agent",
+          "gemini",
+          "site"
+        ],
+        "note": "Gemini plans tool calls; tools fetch only pages on the audited site."
+      },
+      {
+        "id": "verification",
+        "label": "Verification loop",
+        "focus": [
+          "agent",
+          "scanner",
+          "verifier",
+          "api"
+        ],
+        "note": "Every model claim is checked against page source and policy text."
+      },
+      {
+        "id": "human-and-storage",
+        "label": "Human control and storage",
+        "focus": [
+          "reviewer",
+          "ui",
+          "api",
+          "mongo"
+        ],
+        "note": "Fixes are drafted only for approved findings; every audit is stored."
+      }
+    ],
+    "repository": {
+      "url": "https://github.com/gnani4444/policytruth",
+      "revision": "f0ef52a3cf7e8a40206f36712b2f8381b512a430"
+    }
+  },
+  "components": [
+    {
+      "id": "reviewer",
+      "type": "external",
+      "label": "Reviewer",
+      "sublabel": "Founder / DPO",
+      "pos": [
+        40,
+        290
+      ],
+      "size": [
+        130,
+        64
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "Dashboard",
+      "sublabel": "app/page.js",
+      "pos": [
+        240,
+        290
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/page.js"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Audit API",
+      "sublabel": "/api/audit",
+      "pos": [
+        450,
+        290
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/api/audit/route.js"
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "Audit Agent",
+      "sublabel": "lib/agent.js",
+      "pos": [
+        660,
+        290
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "tag": "≤6 pages · ≤10 steps",
+      "sources": [
+        {
+          "path": "lib/agent.js"
+        }
+      ]
+    },
+    {
+      "id": "site",
+      "type": "external",
+      "label": "Audited website",
+      "sublabel": "pages + policies",
+      "pos": [
+        880,
+        290
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "gemini",
+      "type": "cloud",
+      "label": "Gemini 4 Argon",
+      "sublabel": "@google/genai",
+      "pos": [
+        660,
+        120
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "tag": "function calling"
+    },
+    {
+      "id": "mongo",
+      "type": "database",
+      "label": "MongoDB Atlas",
+      "sublabel": "policytruth.audits",
+      "pos": [
+        450,
+        120
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "scanner",
+      "type": "backend",
+      "label": "Scanner + checks",
+      "sublabel": "scan.js · policy.js",
+      "pos": [
+        660,
+        460
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "lib/scan.js"
+        },
+        {
+          "path": "lib/policy.js"
+        }
+      ]
+    },
+    {
+      "id": "verifier",
+      "type": "security",
+      "label": "Evidence verifier",
+      "sublabel": "verify()",
+      "pos": [
+        450,
+        460
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "lib/scan.js"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Vercel: Next.js app",
+      "wraps": [
+        "ui",
+        "api",
+        "agent",
+        "scanner",
+        "verifier"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "reviewer-ui",
+      "from": "reviewer",
+      "to": "ui",
+      "label": "approve",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ui-api",
+      "from": "ui",
+      "to": "api",
+      "label": "POST",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-agent",
+      "from": "api",
+      "to": "agent",
+      "label": "agent mode",
+      "variant": "emphasis"
+    },
+    {
+      "id": "agent-site",
+      "from": "agent",
+      "to": "site",
+      "label": "fetch"
+    },
+    {
+      "id": "agent-gemini",
+      "from": "agent",
+      "to": "gemini",
+      "label": "tool calls",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "api-mongo",
+      "from": "api",
+      "to": "mongo",
+      "label": "store + cache",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "agent-scanner",
+      "from": "agent",
+      "to": "scanner",
+      "label": "HTML + policy",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "scanner-verifier",
+      "from": "scanner",
+      "to": "verifier",
+      "label": "evidence",
+      "variant": "security"
+    },
+    {
+      "id": "verifier-api",
+      "from": "verifier",
+      "to": "api",
+      "label": "verified",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Agent loop",
+      "items": [
+        "Gemini calls inspect_page, read_policy, submit_findings on same-site URLs only",
+        "Verifier rejections go back for one revision"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Verification",
+      "items": [
+        "Claims must match page source and policy text",
+        "Unsupported claims are shown as rejected"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Human control + storage",
+      "items": [
+        "Fixes drafted only for approved findings",
+        "Atlas stores scan, trace, verdicts, approvals"
+      ]
+    }
+  ]
+}

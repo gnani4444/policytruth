@@ -84,6 +84,8 @@ For Vercel, allow access from anywhere (`0.0.0.0/0`) in Atlas Network Access, be
 
 ## How it works
 
+Full architecture, data model and safety notes: [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ```text
 URL ──> fetch page + headers ──> find policy link ──> fetch policy
                 │
