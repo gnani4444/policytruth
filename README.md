@@ -1,11 +1,26 @@
+<div align="center">
+
+<img src="docs/images/landing.png" alt="PolicyTruth landing page: a yellow number-plate input asking which website to test" width="100%" />
+
 # PolicyTruth
 
 **Does your website do what your privacy policy says?**
 
-PolicyTruth audits a website against its own privacy policy. A deterministic scanner records which trackers the site loads. Gemini compares that evidence with the full policy text. A verifier rejects every claim it cannot prove. A human approves each finding before any fix is drafted. Every audit is stored in MongoDB Atlas as an audit trail.
+An MOT for your privacy policy. A Gemini agent inspects the site, reads every policy it can find, and fails anything the two disagree on.<br/>
+A verifier throws out every claim it cannot prove. Nothing is drafted until a human approves it.
 
-- Live: https://policytruth-seven.vercel.app
-- Built at Encode London 2026 for the Google DeepMind, MongoDB and Agents That Ship challenges.
+[![Live demo](https://img.shields.io/badge/Live_demo-policytruth--seven.vercel.app-0b0c0c?style=for-the-badge)](https://policytruth-seven.vercel.app)
+
+![Gemini](https://img.shields.io/badge/Gemini-agent_+_function_calling-1d4fa8?style=flat-square)
+![MongoDB Atlas](https://img.shields.io/badge/MongoDB_Atlas-audit_trail-00703c?style=flat-square)
+![Next.js](https://img.shields.io/badge/Next.js-15-0b0c0c?style=flat-square)
+![UK GDPR · PECR](https://img.shields.io/badge/UK_GDPR-PECR-ffd400?style=flat-square&labelColor=0b0c0c)
+
+Built at **Encode London 2026** for the Google DeepMind, MongoDB and Agents That Ship challenges.
+
+</div>
+
+---
 
 ## Why it exists
 
@@ -14,6 +29,68 @@ Under UK GDPR and PECR, non-essential trackers need consent before they load, an
 In practice, marketing teams add pixels through tag managers every week, and the privacy policy is a template nobody re-reads. Existing tools solve half the problem: cookie scanners list cookies but never read the policy, and policy generators write text but never look at the site.
 
 PolicyTruth is for the UK startup founder or DPO who needs to know, today, whether the site and the policy match.
+
+## How a test works
+
+| | Step | What happens |
+|---|---|---|
+| 1 | **Scan** | A deterministic scanner reads the page source and lists every tracker and consent manager it finds. |
+| 2 | **Read** | A Gemini agent plans the test, inspects up to 6 pages on the site and reads every privacy and cookie policy it finds. |
+| 3 | **Verify** | A verifier checks each claim against the page source and the exact policy text. Rejected claims go back to the agent once, then are shown as "Not reported". |
+| 4 | **Approve** | You tick the defects you agree with. Only then does Gemini draft code and policy fixes. |
+
+## A tour
+
+### The certificate
+
+Every test ends in a certificate: the domain as a number plate, a **FAIL**, **PASS** or **REFUSED** verdict, a 0 to 100 score with grade, and a tally of defects by category.
+
+<img src="docs/images/certificate.png" alt="Privacy test certificate for theguardian.com: FAIL, score 63 of 100, grade C, with a tally of 1 dangerous and 1 major defect" width="100%" />
+
+Verdict rules, borrowed from the MOT:
+
+| Verdict | When |
+|---|---|
+| **FAIL** | At least one verified Dangerous (high) or Major (medium) defect. |
+| **PASS with minor defects** | Only Minor (low) defects. |
+| **PASS** | No verified defects. |
+| **REFUSED** | The site could not be fetched, so nothing was tested and no score is shown. |
+
+### Defects, with the evidence
+
+Each defect shows the line of page source and the exact policy quote it rests on. Claims the verifier rejected are listed separately, struck through, with the reason. Advisories cover missing Article 13 items, missing headers and stale policies.
+
+<img src="docs/images/defects.png" alt="Defects view grouped into Dangerous and Major, each with page-source evidence and the policy quote" width="100%" />
+
+### The agent at work
+
+The **Test log** shows every tool call the agent made, in order, with its stated reason, result and timing, followed by the pipeline timings and the raw run log.
+
+<img src="docs/images/agent-trace.png" alt="Agent trace: inspect_page and read_policy calls across theguardian.com, ending in submit_findings" width="100%" />
+
+### Inspection
+
+The tracker inventory (consent gate and policy disclosure for each vendor), the UK GDPR Article 13 checklist, policy quality and privacy response headers.
+
+<img src="docs/images/inspection.png" alt="Inspection view with tracker inventory, Article 13 checklist and policy quality" width="100%" />
+
+### Approve, then fix
+
+Gemini drafts a consent-gated script for each approved defect and the exact paragraph to add to the privacy policy. Copy buttons on every fix; export the whole test as Markdown, JSON or PDF.
+
+<img src="docs/images/fixes.png" alt="Draft fixes: a consent-gated script and a privacy policy addition" width="100%" />
+
+### History and mobile
+
+Every test is stored in MongoDB Atlas. Tests from today open instantly from the history drawer, with no new model call.
+
+<table>
+<tr>
+<td width="62%"><img src="docs/images/history.png" alt="Test history drawer listing recent tests with grades" /></td>
+<td width="19%"><img src="docs/images/mobile-landing.png" alt="Landing page on a phone" /></td>
+<td width="19%"><img src="docs/images/mobile-certificate.png" alt="Certificate on a phone, verdict first" /></td>
+</tr>
+</table>
 
 ## Quick start
 
@@ -27,7 +104,7 @@ cp .env.example .env.local   # then fill in the values below
 npm run dev                  # open http://localhost:3000
 ```
 
-Enter a domain such as `theguardian.com` and press **Run audit**. The first audit takes about 25 seconds.
+Enter a domain such as `theguardian.com` and press **Start test**. The first audit takes about 25 seconds.
 
 ## Configuration
 
@@ -56,7 +133,7 @@ For Vercel, allow access from anywhere (`0.0.0.0/0`) in Atlas Network Access, be
 - It plans the audit itself: homepage first, then the pages most likely to carry extra trackers (signup, pricing, checkout, contact), then every privacy and cookie policy it finds. It can call several tools in parallel.
 - Budget: up to 6 page inspections and 10 steps. Tools refuse any URL outside the audited site, so page content cannot steer the agent elsewhere.
 - Feedback loop: when the verifier rejects findings, the rejection reasons go back to the agent. It can gather more evidence or drop the claim, then resubmit (one revision round).
-- The Agent trace tab shows every tool call in order, with the agent's stated reason, result and timing.
+- The **Test log** tab shows every tool call in order, with the agent's stated reason, result and timing.
 - Example: on theguardian.com the agent found the full privacy policy at `/help/privacy-policy` (6,754 words) and the cookie policy, which a single-page fetch missed.
 
 **Gemini reasoning, then verification**
@@ -67,7 +144,7 @@ For Vercel, allow access from anywhere (`0.0.0.0/0`) in Atlas Network Access, be
 - The reviewer ticks the findings to act on. Gemini drafts fixes only for those: consent-gated script snippets and a privacy policy addition.
 - Nothing is changed on the audited website.
 
-**Metrics**
+**Readings on the certificate**
 - Compliance score from 0 to 100, with a grade from A to F.
 - Trackers detected, % consent-gated, % named in the policy.
 - Verified findings by severity, and the share of model claims that survived the verifier.
@@ -78,13 +155,15 @@ For Vercel, allow access from anywhere (`0.0.0.0/0`) in Atlas Network Access, be
 - Tracker changes since the previous audit of the same site (needs MongoDB).
 
 **Workflow**
-- Tabs: Overview, Agent trace, Findings, Trackers, Policy, Fixes, History, How it works.
-- Same-day cache: an audit of the same site from today loads from the browser or MongoDB, with no new model call. **Re-run now** forces a fresh audit.
-- Exports: Markdown report, raw JSON, print to PDF. Copy buttons on every fix.
+- Views: Defects, Inspection, Test log and Fixes, with a sticky approve bar. Test history lives in a header drawer and on the home page.
+- Same-day cache: a test of the same site from today loads from the browser or MongoDB, with no new model call. **Re-test now** forces a fresh test.
+- Exports (menu on the certificate): Markdown report, raw JSON, print to PDF. Copy buttons on every fix.
 
-## How it works
+## Architecture
 
-Full architecture, data model and safety notes: [ARCHITECTURE.md](ARCHITECTURE.md).
+Full architecture, data model and safety notes: [ARCHITECTURE.md](ARCHITECTURE.md). Interactive diagram: [docs/architecture.html](docs/architecture.html).
+
+<img src="docs/architecture.png" alt="PolicyTruth architecture diagram" width="100%" />
 
 ```text
 URL ──> fetch page + headers ──> find policy link ──> fetch policy
@@ -108,7 +187,7 @@ URL ──> fetch page + headers ──> find policy link ──> fetch policy
 
 | Path | Purpose |
 |---|---|
-| `app/page.js` | Dashboard UI (client component). |
+| `app/page.js` | Certificate UI (client component). Motion components in `components/`. |
 | `app/api/audit/route.js` | `POST` runs an audit or drafts fixes; `GET` returns recent audits. |
 | `lib/scan.js` | Tracker and consent-manager detection, policy link finder, verifier. |
 | `lib/policy.js` | Article 13 checklist, readability, last-updated date, privacy headers. |
@@ -146,6 +225,14 @@ npm test
 ```
 
 Covers tracker detection, consent gating, disclosure matching, verifier rejections, Article 13 coverage and policy age.
+
+## Design
+
+The interface is a test certificate on white paper: ink, a yellow number plate for the domain, green for pass and red for fail. The rules are recorded in [DESIGN.md](DESIGN.md).
+
+- Type: Archivo (variable width) for everything, JetBrains Mono only for evidence.
+- Motion: [React Bits](https://reactbits.dev) (`BlurText`, `CountUp`, `DecryptedText`) and [motion-primitives](https://motion-primitives.com) via [21st.dev](https://21st.dev) (`AnimatedBackground`, `TextShimmer`), built on [Motion](https://motion.dev). All motion respects `prefers-reduced-motion`.
+- Styling: Tailwind CSS v4.
 
 ## Deploy
 
